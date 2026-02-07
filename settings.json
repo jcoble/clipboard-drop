@@ -1,0 +1,8 @@
+{
+  "max_clips": 50,
+  "window": {
+    "width": 700,
+    "height": 600,
+    "opacity": 0.95
+  }
+}
