@@ -4,6 +4,7 @@ Clipboard Drop - macOS Menu Bar Clip Saver
 A lightweight menu bar app for saving and retrieving clipboard content.
 """
 
+import sys
 import rumps
 import json
 import time
@@ -14,9 +15,21 @@ import AppKit
 import WebKit
 import objc
 
-CLIPS_DIR = Path(__file__).parent / "clips"
+
+def _get_data_dir():
+    """Get data directory. Uses Application Support when running as .app bundle."""
+    if getattr(sys, "frozen", False):
+        data_dir = Path.home() / "Library" / "Application Support" / "ClipboardDrop"
+    else:
+        data_dir = Path(__file__).parent
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+DATA_DIR = _get_data_dir()
+CLIPS_DIR = DATA_DIR / "clips"
 CLIPS_JSON = CLIPS_DIR / "clips.json"
-SETTINGS_PATH = Path(__file__).parent / "settings.json"
+SETTINGS_PATH = DATA_DIR / "settings.json"
 
 # Dark mode CSS for preview windows
 PREVIEW_CSS = """
@@ -82,11 +95,18 @@ pre {
 """
 
 
+DEFAULT_SETTINGS = {"max_clips": 50, "window": {"width": 700, "height": 600, "opacity": 0.95}}
+
+
 def load_settings():
     if SETTINGS_PATH.exists():
         with open(SETTINGS_PATH) as f:
             return json.load(f)
-    return {"max_clips": 50, "window": {"width": 700, "height": 600, "opacity": 0.95}}
+    # Create default settings file if it doesn't exist
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(SETTINGS_PATH, "w") as f:
+        json.dump(DEFAULT_SETTINGS, f, indent=2)
+    return DEFAULT_SETTINGS
 
 
 def load_clips():
