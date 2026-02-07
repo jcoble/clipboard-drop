@@ -62,7 +62,23 @@ pre {
     margin-bottom: 12px;
     padding-bottom: 8px;
     border-bottom: 1px solid #30363d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
+.copy-btn {
+    background: #21262d;
+    color: #8b949e;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    transition: all 0.15s ease;
+}
+.copy-btn:hover { background: #30363d; color: #e6edf3; }
+.copy-btn.copied { background: #238636; border-color: #238636; color: #fff; }
 """
 
 
@@ -213,8 +229,19 @@ def render_text_preview(text, timestamp):
 <meta charset="utf-8">
 <style>{PREVIEW_CSS}</style>
 </head><body>
-<div class="clip-meta">Text clip &middot; {time_str}</div>
+<div class="clip-meta">
+    <span>Text clip &middot; {time_str}</span>
+    <button class="copy-btn" onclick="copyClip(this)">Copy</button>
+</div>
 <pre>{escaped}</pre>
+<script>
+function copyClip(btn) {{
+    window.webkit.messageHandlers.copyClip.postMessage('copy');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = 'Copy'; btn.classList.remove('copied'); }}, 1500);
+}}
+</script>
 </body></html>"""
 
 
@@ -232,10 +259,21 @@ def render_image_preview(filename, timestamp):
 <meta charset="utf-8">
 <style>{PREVIEW_CSS}</style>
 </head><body>
-<div class="clip-meta">Image clip &middot; {time_str}</div>
+<div class="clip-meta">
+    <span>Image clip &middot; {time_str}</span>
+    <button class="copy-btn" onclick="copyClip(this)">Copy</button>
+</div>
 <div class="image-container">
     <img src="data:image/png;base64,{b64}">
 </div>
+<script>
+function copyClip(btn) {{
+    window.webkit.messageHandlers.copyClip.postMessage('copy');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = 'Copy'; btn.classList.remove('copied'); }}, 1500);
+}}
+</script>
 </body></html>"""
 
 
@@ -246,6 +284,8 @@ class FloatingWindow:
         self._panel = None
         self._webview = None
         self._current_clip_id = None
+        self._current_clip = None
+        self._copy_handler = None
 
     def _ensure_panel(self):
         if self._panel is not None:
@@ -277,7 +317,12 @@ class FloatingWindow:
         self._panel.setHidesOnDeactivate_(False)
         self._panel.setDelegate_(_ClipPanelDelegate.alloc().initWithWindow_(self))
 
+        # Set up WKWebView with copy message handler
         config = WebKit.WKWebViewConfiguration.alloc().init()
+        self._copy_handler = _CopyMessageHandler.alloc().initWithWindow_(self)
+        config.userContentController().addScriptMessageHandler_name_(
+            self._copy_handler, "copyClip"
+        )
         self._webview = WebKit.WKWebView.alloc().initWithFrame_configuration_(
             AppKit.NSMakeRect(0, 0, width, height), config
         )
@@ -289,6 +334,7 @@ class FloatingWindow:
     def show_clip(self, clip):
         self._ensure_panel()
         self._current_clip_id = clip["id"]
+        self._current_clip = clip
 
         if clip["type"] == "text":
             html = render_text_preview(clip["content"], clip["timestamp"])
@@ -328,6 +374,31 @@ class _ClipPanelDelegate(AppKit.NSObject):
 
     def windowWillClose_(self, notification):
         pass
+
+
+class _CopyMessageHandler(AppKit.NSObject):
+    """WKScriptMessageHandler that copies clip content to system clipboard."""
+    _floating_window = None
+
+    def initWithWindow_(self, floating_window):
+        self = objc.super(_CopyMessageHandler, self).init()
+        if self is not None:
+            self._floating_window = floating_window
+        return self
+
+    def userContentController_didReceiveScriptMessage_(self, controller, message):
+        if not self._floating_window or not self._floating_window._current_clip:
+            return
+        clip = self._floating_window._current_clip
+        pb = AppKit.NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        if clip["type"] == "text":
+            pb.setString_forType_(clip["content"], AppKit.NSPasteboardTypeString)
+        elif clip["type"] == "image":
+            img_path = CLIPS_DIR / clip["filename"]
+            if img_path.exists():
+                img_data = AppKit.NSData.dataWithContentsOfFile_(str(img_path))
+                pb.setData_forType_(img_data, AppKit.NSPasteboardTypePNG)
 
 
 class ClipboardDropApp(rumps.App):
